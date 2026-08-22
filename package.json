@@ -11,6 +11,8 @@
     "test": "jest"
   },
   "dependencies": {
+    "@apollo/server": "^5.0.0",
+    "@as-integrations/express5": "^1.1.2",
     "@nestjs/apollo": "^13.0.0",
     "@nestjs/axios": "^4.0.0",
     "@nestjs/common": "^11.0.0",
@@ -36,8 +38,7 @@
     "pg": "^8.12.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.20",
-    "@apollo/server": "^5.0.0"
+    "typeorm": "^0.3.20"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
