@@ -74,4 +74,13 @@ export class UsersService {
   count(): Promise<number> {
     return this.users.count();
   }
+
+  adminExists(): Promise<boolean> {
+    return this.users.exists({ where: { role: "admin" } });
+  }
+
+  /** Role changes are an admin-only operation — never driven by user input. */
+  async setRole(id: string, role: Role): Promise<void> {
+    await this.users.update(id, { role });
+  }
 }
