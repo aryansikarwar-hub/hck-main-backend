@@ -11,7 +11,10 @@ export interface CrackPrediction {
   confidence: number;
   bbox: [number, number, number, number]; // x1, y1, x2, y2 (normalized 0-1)
   maskUrl?: string; // segmentation overlay, if the segmentation model ran
-  measurementSource?: "segmentation" | "bbox-heuristic"; // which method produced widthMm
+  // Which method produced widthMm. "cv-mask" is the classical-CV fallback the
+  // inference service runs when no ONNX model is loaded — a genuinely
+  // measured mask, but from morphology rather than the segmentation model.
+  measurementSource?: "segmentation" | "bbox-heuristic" | "cv-mask";
 }
 
 export interface MlPredictResponse {
