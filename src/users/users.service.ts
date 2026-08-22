@@ -1,7 +1,11 @@
 import { ConflictException, Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
-import * as bcrypt from "bcrypt";
+// bcryptjs, not bcrypt: the native bcrypt module compiles via node-gyp and
+// needs python3/make/g++ at build time, which is a common cause of failed
+// deploys on PaaS build images. bcryptjs is pure JS, same hash format,
+// no toolchain required.
+import * as bcrypt from "bcryptjs";
 import { User } from "./user.entity";
 import { Role } from "../auth/roles.decorator";
 
