@@ -12,8 +12,18 @@ export class MlStatus {
   @Field(() => Boolean, { description: "Whether the backend can reach the inference service at all" })
   reachable: boolean;
 
-  @Field(() => Boolean, { description: "Whether model weights are actually loaded and /predict will work" })
+  // Deliberately no longer "…and /predict will work": since the classical-CV
+  // fallback exists, false no longer implies uploads fail. `engine` is the
+  // field that answers that question.
+  @Field(() => Boolean, { description: "Whether trained model weights are actually loaded" })
   modelLoaded: boolean;
+
+  @Field(() => String, {
+    description:
+      "Which detector answers /predict right now: 'onnx' (trained model), " +
+      "'opencv-heuristic' (classical-CV fallback — uploads still work), or 'none' (they do not).",
+  })
+  engine: string;
 
   @Field(() => String, { nullable: true })
   modelVersion: string | null;

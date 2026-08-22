@@ -137,19 +137,27 @@ export class MlService {
   async status(): Promise<MlServiceStatus> {
     try {
       const { data } = await firstValueFrom(
-        this.http.get<{ status?: string; model_version?: string; model_loaded?: boolean }>(
-          `${this.baseUrl}/health`,
-          { timeout: 5000 }
-        )
+        this.http.get<{
+          status?: string;
+          model_version?: string;
+          model_loaded?: boolean;
+          engine?: MlEngine;
+        }>(`${this.baseUrl}/health`, { timeout: 5000 })
       );
+
+      const modelLoaded = Boolean(data?.model_loaded);
+      // Inference services older than the classical-CV fallback don't send
+      // `engine`. Infer it from model_loaded rather than defaulting to "none",
+      // which would report a working service as broken.
+      const engine: MlEngine = data?.engine ?? (modelLoaded ? "onnx" : "none");
+
       return {
         reachable: true,
-        modelLoaded: Boolean(data?.model_loaded),
+        modelLoaded,
+        engine,
         modelVersion: data?.model_version ?? null,
         serviceUrl: this.baseUrl,
-        detail: data?.model_loaded
-          ? null
-          : "The service is running but no model weights are loaded. Train a model and export it to ONNX, then point MODEL_PATH at it.",
+        detail: MlService.statusDetail(modelLoaded, engine),
       };
     } catch (error) {
       const code = (error as AxiosError)?.code;
@@ -157,17 +165,48 @@ export class MlService {
       return {
         reachable: false,
         modelLoaded: false,
+        engine: "none",
         modelVersion: null,
         serviceUrl: this.baseUrl,
         detail: `The analysis service is unreachable at ${this.baseUrl}. Check ML_SERVICE_URL and that the service is deployed.`,
       };
     }
   }
+
+  /**
+   * One sentence on what the service can actually do right now.
+   *
+   * `modelLoaded: false` used to mean exactly one thing — uploads fail. Since
+   * the classical-CV fallback exists it can also mean "uploads work, by a
+   * weaker method", and saying "uploads will be rejected" in that state is
+   * simply untrue.
+   */
+  private static statusDetail(modelLoaded: boolean, engine: MlEngine): string | null {
+    if (modelLoaded) return null;
+
+    if (engine === "opencv-heuristic") {
+      return (
+        "No trained weights are loaded, so the service is running its classical computer-vision " +
+        "fallback: it finds cracks by shape and contrast rather than by a learned model, and its " +
+        "confidence scores are geometric plausibility, not measured accuracy. Uploads work. Train a " +
+        "model and point MODEL_PATH at the exported ONNX file to replace it."
+      );
+    }
+
+    return (
+      "The service is running but no model weights are loaded and the fallback is disabled. " +
+      "Train a model and export it to ONNX, then point MODEL_PATH at it."
+    );
+  }
 }
+
+/** Which detector answered — see ml-model/service/heuristic.py. */
+export type MlEngine = "onnx" | "opencv-heuristic" | "none";
 
 export interface MlServiceStatus {
   reachable: boolean;
   modelLoaded: boolean;
+  engine: MlEngine;
   modelVersion: string | null;
   serviceUrl: string;
   detail: string | null;
