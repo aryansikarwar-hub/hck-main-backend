@@ -1,5 +1,5 @@
 import { Field, Float, ID, ObjectType } from "@nestjs/graphql";
-import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 import { CaptureSource, Severity } from "../common/enums";
 
 @ObjectType()
@@ -38,6 +38,8 @@ export class RepairBrief {
  * forecast, and — for confirmed high-severity detections — a repair brief.
  */
 @ObjectType()
+// Every detection lookup is "for this structure, newest first".
+@Index(["structureId", "capturedAt"])
 @Entity("detections")
 export class Detection {
   @Field(() => ID)

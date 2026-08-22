@@ -1,5 +1,5 @@
 import { Field, Float, ID, Int, ObjectType } from "@nestjs/graphql";
-import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 import { Severity, StructureType } from "../common/enums";
 import { Detection } from "../detections/detection.entity";
 
@@ -12,6 +12,8 @@ import { Detection } from "../detections/detection.entity";
  * wired up via TypeOrmModule in app.module.ts.
  */
 @ObjectType()
+@Index(["riskLevel"])
+@Index(["zoneId"])
 @Entity("structures")
 export class Structure {
   @Field(() => ID)
@@ -45,6 +47,20 @@ export class Structure {
   @Field(() => Int)
   @Column({ default: 0 })
   activeDetections: number;
+
+  /**
+   * How costly a failure of this structure would be (1 low - 3 high): traffic
+   * volume, population served, redundancy. Feeds the budget simulator's
+   * priority score alongside severity and time-to-critical.
+   */
+  @Field(() => Int)
+  @Column({ type: "smallint", default: 1 })
+  criticalityWeight: number;
+
+  /** District/zone grouping, used to aggregate the city-wide risk heatmap. */
+  @Field()
+  @Column({ default: "unzoned" })
+  zoneId: string;
 
   @Field(() => [Detection], { nullable: true })
   detections?: Detection[];

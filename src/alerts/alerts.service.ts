@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Alert } from "./alert.entity";
+import { Paged } from "../common/pagination";
 
 @Injectable()
 export class AlertsService {
@@ -9,8 +10,17 @@ export class AlertsService {
     @InjectRepository(Alert) private readonly repo: Repository<Alert>
   ) {}
 
-  findAll(): Promise<Alert[]> {
-    return this.repo.find({ order: { createdAt: "DESC" } });
+  /**
+   * Unacknowledged first, then newest — matches how the inbox is actually
+   * read, and is covered by the (acknowledged, createdAt) index.
+   */
+  async findPaged(limit: number, offset: number): Promise<Paged<Alert>> {
+    const [items, totalCount] = await this.repo.findAndCount({
+      order: { acknowledged: "ASC", createdAt: "DESC" },
+      take: limit,
+      skip: offset,
+    });
+    return { items, totalCount, hasMore: offset + items.length < totalCount };
   }
 
   async acknowledge(id: string): Promise<Alert | undefined> {

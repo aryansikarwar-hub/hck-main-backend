@@ -1,5 +1,5 @@
 import { Field, ID, ObjectType } from "@nestjs/graphql";
-import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, PrimaryGeneratedColumn, Index } from "typeorm";
 import { Severity } from "../common/enums";
 
 /**
@@ -11,6 +11,9 @@ import { Severity } from "../common/enums";
  * PRD's separate microservices.
  */
 @ObjectType()
+// The inbox is always "unacknowledged first, newest first".
+@Index(["acknowledged", "createdAt"])
+@Index(["structureId"])
 @Entity("alerts")
 export class Alert {
   @Field(() => ID)

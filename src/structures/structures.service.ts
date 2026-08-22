@@ -2,6 +2,9 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Structure } from "./structure.entity";
+
+/** Ceiling for the map query. Revisit with clustering/bbox queries beyond this. */
+const MAX_STRUCTURES = 500;
 import { Severity } from "../common/enums";
 
 @Injectable()
@@ -10,8 +13,22 @@ export class StructuresService {
     @InjectRepository(Structure) private readonly repo: Repository<Structure>
   ) {}
 
-  findAll(): Promise<Structure[]> {
-    return this.repo.find();
+  /**
+   * The map genuinely needs every pin, so this is capped rather than paged —
+   * but it IS capped: an unbounded find() on a growing table is a latency
+   * and memory risk. Filters are applied in SQL, not in the client.
+   */
+  findAll(filter: { riskLevel?: string; type?: string; zoneId?: string } = {}): Promise<Structure[]> {
+    const where: Record<string, string> = {};
+    if (filter.riskLevel) where.riskLevel = filter.riskLevel;
+    if (filter.type) where.type = filter.type;
+    if (filter.zoneId) where.zoneId = filter.zoneId;
+
+    return this.repo.find({
+      where: Object.keys(where).length ? where : undefined,
+      order: { name: "ASC" },
+      take: MAX_STRUCTURES,
+    });
   }
 
   async findOne(id: string): Promise<Structure> {
