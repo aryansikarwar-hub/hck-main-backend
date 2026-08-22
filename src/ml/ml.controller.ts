@@ -1,4 +1,5 @@
 import { BadRequestException, Controller, Param, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Roles } from "../auth/roles.decorator";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { randomUUID } from "crypto";
 import { MlService } from "./ml.service";
@@ -29,6 +30,9 @@ export class MlController {
     private readonly alerts: AlertsService
   ) {}
 
+  // Uploading inspection media is a field/engineering action. Viewers
+  // (public-read) must not be able to inject detections or raise alerts.
+  @Roles("inspector", "engineer", "admin")
   @Post(":structureId")
   @UseInterceptors(FileInterceptor("file"))
   async ingest(@Param("structureId") structureId: string, @UploadedFile() file?: Express.Multer.File) {

@@ -5,17 +5,20 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./jwt.strategy";
+import { UsersModule } from "../users/users.module";
 
 @Module({
   imports: [
     PassportModule,
+    UsersModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>("JWT_SECRET") ?? "change-me-in-production",
-        signOptions: { expiresIn: "15m" },
-      }),
+      useFactory: (config: ConfigService) => {
+        const secret = config.get<string>("JWT_SECRET");
+        if (!secret) throw new Error("JWT_SECRET is not set. Refusing to start with an insecure default.");
+        return { secret, signOptions: { expiresIn: config.get<string>("JWT_ACCESS_TTL") ?? "15m" } };
+      },
     }),
   ],
   controllers: [AuthController],
