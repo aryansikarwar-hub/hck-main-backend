@@ -1,4 +1,14 @@
-import { BadRequestException, Controller, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from "@nestjs/common";
+import {
+  BadRequestException,
+  Controller,
+  InternalServerErrorException,
+  Logger,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from "@nestjs/common";
 import { Roles } from "../auth/roles.decorator";
 import { MAX_UPLOAD_BYTES, StorageService } from "../storage/storage.service";
 import { FileInterceptor } from "@nestjs/platform-express";
@@ -24,6 +34,8 @@ const HIGH_SEVERITY: Severity[] = [Severity.HIGH, Severity.CRITICAL];
  */
 @Controller("ingest")
 export class MlController {
+  private readonly logger = new Logger(MlController.name);
+
   constructor(
     private readonly ml: MlService,
     private readonly detections: DetectionsService,
@@ -55,37 +67,50 @@ export class MlController {
     const result = await this.ml.predict(file.buffer, file.originalname);
 
     const created: Detection[] = [];
-    for (const p of result.predictions) {
-      const detection: Detection = {
-        id: randomUUID(),
-        structureId,
-        imageUrl: stored.url,
-        annotatedImageUrl: p.maskUrl ?? stored.url,
-        crackType: p.crackType,
-        widthMm: p.widthMm,
-        lengthCm: p.lengthCm,
-        severity: p.severity as Severity,
-        confidence: p.confidence,
-        location: `${structure.name} (auto-located)`,
-        capturedAt: new Date().toISOString(),
-        capturedBy: CaptureSource.WEB,
-      };
-      await this.detections.create(detection);
-
-      if (HIGH_SEVERITY.includes(detection.severity)) {
-        await this.structures.bumpRisk(structureId, detection.severity);
-        await this.alerts.raise({
+    try {
+      for (const p of result.predictions) {
+        const detection: Detection = {
           id: randomUUID(),
           structureId,
-          structureName: structure.name,
-          detectionId: detection.id,
-          severity: detection.severity,
-          message: `${p.crackType} crack detected (${p.widthMm}mm) — ${detection.severity} severity.`,
-          createdAt: new Date().toISOString(),
-          acknowledged: false,
-        });
+          imageUrl: stored.url,
+          annotatedImageUrl: p.maskUrl ?? stored.url,
+          crackType: p.crackType,
+          widthMm: p.widthMm,
+          lengthCm: p.lengthCm,
+          severity: p.severity as Severity,
+          confidence: p.confidence,
+          location: `${structure.name} (auto-located)`,
+          capturedAt: new Date().toISOString(),
+          capturedBy: CaptureSource.WEB,
+        };
+        await this.detections.create(detection);
+
+        if (HIGH_SEVERITY.includes(detection.severity)) {
+          await this.structures.bumpRisk(structureId, detection.severity);
+          await this.alerts.raise({
+            id: randomUUID(),
+            structureId,
+            structureName: structure.name,
+            detectionId: detection.id,
+            severity: detection.severity,
+            message: `${p.crackType} crack detected (${p.widthMm}mm) — ${detection.severity} severity.`,
+            createdAt: new Date().toISOString(),
+            acknowledged: false,
+          });
+        }
+        created.push(detection);
       }
-      created.push(detection);
+    } catch (error) {
+      // Persistence is the last stage. Without this the analysis has already
+      // succeeded and the image is already stored, but a DB failure would
+      // still surface as a bare 500 that names no stage at all.
+      this.logger.error(
+        `Failed to persist detections for structure ${structureId}`,
+        error instanceof Error ? error.stack : String(error)
+      );
+      throw new InternalServerErrorException(
+        "The image was analysed but its results could not be saved. Please try again."
+      );
     }
 
     return { modelVersion: result.modelVersion, inferenceMs: result.inferenceMs, detections: created };

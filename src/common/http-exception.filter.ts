@@ -48,10 +48,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         }
       }
     } else {
-      this.logger.error(
-        `Unhandled ${request.method} ${request.url}`,
-        exception instanceof Error ? exception.stack : String(exception)
-      );
+      this.logger.error(`Unhandled ${request.method} ${request.url}`, describeUnknownError(exception));
     }
 
     response.status(status).json({
@@ -62,4 +59,32 @@ export class HttpExceptionFilter implements ExceptionFilter {
       },
     });
   }
+}
+
+/**
+ * Renders an unknown thrown value into something a log reader can act on.
+ *
+ * `String(exception)` was used here, which prints "[object Object]" for any
+ * thrown plain object — and several SDKs (Cloudinary among them) reject with
+ * plain objects like { message, name, http_code } rather than Errors. The
+ * result was a 500 in the logs with literally no information about its cause.
+ */
+function describeUnknownError(exception: unknown): string {
+  if (exception instanceof Error) return exception.stack ?? `${exception.name}: ${exception.message}`;
+
+  if (exception && typeof exception === "object") {
+    try {
+      // Include non-enumerable props too — SDK error objects often hide
+      // `message` behind one.
+      const own = Object.getOwnPropertyNames(exception).reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = (exception as Record<string, unknown>)[key];
+        return acc;
+      }, {});
+      return JSON.stringify(own);
+    } catch {
+      return Object.prototype.toString.call(exception);
+    }
+  }
+
+  return String(exception);
 }
