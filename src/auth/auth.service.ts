@@ -1,6 +1,16 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { JwtService } from "@nestjs/jwt";
+import { JwtService, JwtSignOptions } from "@nestjs/jwt";
+
+/**
+ * @nestjs/jwt v11 types expiresIn as `number | ms.StringValue`, a template
+ * literal type ("15m", "30d", ...). Values read from the environment are
+ * plain strings, so they are narrowed here in one place rather than casting
+ * at each call site.
+ */
+type ExpiresIn = JwtSignOptions["expiresIn"];
+const ttl = (value: string | undefined, fallback: string): ExpiresIn =>
+  (value ?? fallback) as ExpiresIn;
 import { LOCKOUT_MINUTES, UsersService } from "../users/users.service";
 import { User } from "../users/user.entity";
 import { Role } from "./roles.decorator";
@@ -70,11 +80,11 @@ export class AuthService {
     return {
       accessToken: this.jwt.sign(
         { ...base, type: "access" },
-        { expiresIn: this.config.get<string>("JWT_ACCESS_TTL") ?? "15m" }
+        { expiresIn: ttl(this.config.get<string>("JWT_ACCESS_TTL"), "15m") }
       ),
       refreshToken: this.jwt.sign(
         { sub: user.id, type: "refresh" },
-        { secret: this.refreshSecret(), expiresIn: this.config.get<string>("JWT_REFRESH_TTL") ?? "30d" }
+        { secret: this.refreshSecret(), expiresIn: ttl(this.config.get<string>("JWT_REFRESH_TTL"), "30d") }
       ),
       user: { id: user.id, email: user.email, name: user.name, role: user.role },
     };
