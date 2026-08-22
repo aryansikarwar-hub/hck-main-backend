@@ -5,20 +5,16 @@
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "allowSyntheticDefaultImports": true,
 
-    "// esModuleInterop": [
-      "Required at RUNTIME, not cosmetic.",
-      "allowSyntheticDefaultImports above only silences the TYPE error for",
-      "`import DataLoader from \"dataloader\"`. Without esModuleInterop the",
-      "compiler emits a bare `dataloader_1.default`, and dataloader is a",
-      "CommonJS module whose export IS the constructor (module.exports =",
-      "DataLoader), so `.default` is undefined. Every GraphQL query that",
-      "touches DetectionsLoader then fails with",
-      "\"dataloader_1.default is not a constructor\".",
-      "esModuleInterop emits the __importDefault helper that makes the default",
-      "import resolve correctly. It is on by default in Nest's own tsconfig."
-    ],
+    // allowSyntheticDefaultImports only silences the TYPE error for a default
+    // import of a CommonJS module. esModuleInterop is what emits the
+    // __importDefault runtime helper — without it, `import DataLoader from
+    // "dataloader"` compiles to a bare `dataloader_1.default`, and dataloader
+    // exports the constructor itself (module.exports = DataLoader), so
+    // `.default` is undefined. Every GraphQL query touching DetectionsLoader
+    // then died with "dataloader_1.default is not a constructor".
+    // Nest's own generated tsconfig ships with esModuleInterop on.
+    "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
 
     "target": "ES2021",
