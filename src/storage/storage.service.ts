@@ -92,22 +92,45 @@ export class StorageService {
       throw new ServiceUnavailableException("File storage is not configured on this server.");
     }
 
-    const result = await new Promise<UploadApiResponse>((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream(
-        {
-          folder: opts.folder,
-          resource_type: opts.resourceType ?? "image",
-          overwrite: false,
-          unique_filename: true,
-          use_filename: false,
-        },
-        (error, uploaded) => {
-          if (error || !uploaded) return reject(error ?? new Error("Upload returned no result"));
-          resolve(uploaded);
-        }
-      );
-      stream.end(buffer);
-    });
+    let result: UploadApiResponse;
+    try {
+      result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: opts.folder,
+            resource_type: opts.resourceType ?? "image",
+            overwrite: false,
+            unique_filename: true,
+            use_filename: false,
+          },
+          (error, uploaded) => {
+            if (error || !uploaded) return reject(error ?? new Error("Upload returned no result"));
+            resolve(uploaded);
+          }
+        );
+        stream.end(buffer);
+      });
+    } catch (error) {
+      // Cloudinary's callback errors used to reject with a raw object, which
+      // escaped as an opaque 500 "Internal server error" — the caller learned
+      // nothing about whether the credentials were wrong, the plan was over
+      // quota, or the network was down.
+      const cloudinaryError = error as { http_code?: number; message?: string };
+      const httpCode = cloudinaryError?.http_code;
+      const detail = cloudinaryError?.message ?? String(error);
+
+      this.logger.error(`Cloudinary upload failed (http_code=${httpCode ?? "none"}): ${detail}`);
+
+      if (httpCode === 401 || httpCode === 403) {
+        throw new ServiceUnavailableException(
+          "File storage rejected our credentials. Check CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET / CLOUDINARY_CLOUD_NAME."
+        );
+      }
+      if (httpCode === 420 || httpCode === 429) {
+        throw new ServiceUnavailableException("File storage rate limit or quota reached. Try again later.");
+      }
+      throw new ServiceUnavailableException(`File storage could not accept the upload: ${detail}`);
+    }
 
     return {
       url: result.secure_url,
