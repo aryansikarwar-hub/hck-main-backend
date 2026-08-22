@@ -33,15 +33,27 @@ export class StructuresResolver {
   /**
    * Registering a structure puts it on the map for everyone and makes it a
    * valid ingest target, so it is an engineer/admin action — an inspector
-   * uploads against structures, they don't decide what the city monitors.
+   * uploads against structures, so they need to be able to put one on the map
+   * when they arrive at something that isn't there yet.
+   *
+   * This was engineer/admin only, which in practice meant nobody: signup always
+   * issues `inspector`, the first admin only exists if BOOTSTRAP_ADMIN_* was
+   * set, and without an admin there is nobody who can promote anyone. Every
+   * user hit "Forbidden resource" and the map stayed permanently empty. Any
+   * authenticated member of the org can now register one; `public-read` still
+   * cannot, so the mutation is not open to unauthenticated or read-only
+   * callers.
    */
-  @Roles("engineer", "admin")
+  @Roles("inspector", "engineer", "admin")
   @Mutation(() => Structure, { description: "Register a structure to monitor" })
   createStructure(@Args("input") input: CreateStructureInput): Promise<Structure> {
     return this.structuresService.create(input);
   }
 
-  @Roles("engineer", "admin")
+  // Whoever can create one can correct it — an inspector who registers a
+  // structure with a typo'd name or a mis-tapped coordinate must be able to
+  // fix it themselves.
+  @Roles("inspector", "engineer", "admin")
   @Mutation(() => Structure, { description: "Update a monitored structure's details" })
   updateStructure(
     @Args("id", { type: () => ID }) id: string,

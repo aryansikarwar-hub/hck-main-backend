@@ -42,11 +42,13 @@ Signup always creates an `inspector` and ignores any role in the request body, s
 | Role | Can |
 |---|---|
 | `public-read` | Read structures, detections, alerts |
-| `inspector` | Above, plus upload inspection media and acknowledge alerts |
-| `engineer` | Above, plus create and update structures |
+| `inspector` | Above, plus register/update structures, upload inspection media, acknowledge alerts |
+| `engineer` | Same as inspector today; kept as a distinct role for future engineering-only surfaces |
 | `admin` | Everything, plus delete structures and manage user roles |
 
-**The first admin comes from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`.** There is no other path — and without an admin or engineer, nobody can register a structure, so the map stays empty. Set both vars, boot once, sign in, promote your real accounts from the dashboard's `/admin` page, then remove the vars.
+Registering a structure is deliberately open to any signed-in account. It was engineer/admin only, which in practice meant nobody: signup always issues `inspector`, and promoting anyone requires an admin that only exists if `BOOTSTRAP_ADMIN_*` was set — so every user got "Forbidden resource" and the map stayed permanently empty.
+
+**The first admin comes from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`.** There is no other path. You now only need it to manage roles or delete structures, not for day-to-day use. Set both vars, boot once, sign in, then remove the vars.
 
 ## Rate limiting
 
