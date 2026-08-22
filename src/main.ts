@@ -1,4 +1,5 @@
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
@@ -23,7 +24,13 @@ function resolveCorsOrigins(): string[] | boolean {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Render terminates TLS at its edge and forwards to us, so without this
+  // `req.ip` is the proxy's address rather than the caller's — which silently
+  // lumps every client into one rate-limit bucket. See GqlThrottlerGuard for
+  // the other half of this (the Next.js BFF forwarding the browser's IP).
+  app.set("trust proxy", 1);
 
   app.use(
     helmet({

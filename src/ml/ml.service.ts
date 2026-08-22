@@ -124,4 +124,51 @@ export class MlService {
       return false;
     }
   }
+
+  /**
+   * The inference service's own account of itself, for the admin page.
+   *
+   * That page used to render a hardcoded table of model versions with invented
+   * recall figures (92.4%, 89.1%, 88.7%) presented as measured results. No
+   * model had ever been trained. Reading the live service instead means the
+   * page can only ever show what is actually loaded — including, honestly,
+   * "no model loaded" when that is the truth.
+   */
+  async status(): Promise<MlServiceStatus> {
+    try {
+      const { data } = await firstValueFrom(
+        this.http.get<{ status?: string; model_version?: string; model_loaded?: boolean }>(
+          `${this.baseUrl}/health`,
+          { timeout: 5000 }
+        )
+      );
+      return {
+        reachable: true,
+        modelLoaded: Boolean(data?.model_loaded),
+        modelVersion: data?.model_version ?? null,
+        serviceUrl: this.baseUrl,
+        detail: data?.model_loaded
+          ? null
+          : "The service is running but no model weights are loaded. Train a model and export it to ONNX, then point MODEL_PATH at it.",
+      };
+    } catch (error) {
+      const code = (error as AxiosError)?.code;
+      this.logger.warn(`ML status check failed for ${this.baseUrl}: ${code ?? "unknown error"}`);
+      return {
+        reachable: false,
+        modelLoaded: false,
+        modelVersion: null,
+        serviceUrl: this.baseUrl,
+        detail: `The analysis service is unreachable at ${this.baseUrl}. Check ML_SERVICE_URL and that the service is deployed.`,
+      };
+    }
+  }
+}
+
+export interface MlServiceStatus {
+  reachable: boolean;
+  modelLoaded: boolean;
+  modelVersion: string | null;
+  serviceUrl: string;
+  detail: string | null;
 }

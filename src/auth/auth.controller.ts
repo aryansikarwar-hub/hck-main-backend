@@ -39,8 +39,13 @@ class RefreshDto {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  // 5 signups per hour per IP — stops automated account farming.
-  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  // 20 signups per hour per client IP — enough that a team onboarding
+  // together doesn't lock itself out, tight enough to stop account farming.
+  //
+  // "per client IP" only became true once GqlThrottlerGuard started keying on
+  // the address the Next.js BFF forwards. Before that every signup in the
+  // world shared Vercel's egress IP and this limit was effectively global.
+  @Throttle({ default: { limit: 20, ttl: 3_600_000 } })
   @Public()
   @Post("signup")
   signup(@Body() dto: SignupDto) {

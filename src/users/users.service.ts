@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 // bcryptjs, not bcrypt: the native bcrypt module compiles via node-gyp and
@@ -83,8 +83,21 @@ export class UsersService {
     return this.users.exists({ where: { role: "admin" } });
   }
 
+  /** Newest first — the admin table's most common question is "who just signed up?". */
+  findAll(): Promise<User[]> {
+    return this.users.find({ order: { createdAt: "DESC" }, take: 500 });
+  }
+
   /** Role changes are an admin-only operation — never driven by user input. */
   async setRole(id: string, role: Role): Promise<void> {
     await this.users.update(id, { role });
+  }
+
+  /** setRole plus the updated row, for resolvers that must return the user. */
+  async setRoleAndReturn(id: string, role: Role): Promise<User> {
+    const user = await this.findById(id);
+    if (!user) throw new NotFoundException(`User ${id} not found`);
+    user.role = role;
+    return this.users.save(user);
   }
 }
