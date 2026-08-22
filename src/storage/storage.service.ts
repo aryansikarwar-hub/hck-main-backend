@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { v2 as cloudinary, UploadApiResponse } from "cloudinary";
 import { env } from "../config/env";
+import { MediaService } from "./media.service";
 
 /** Only formats the ML service and the dashboard can actually handle. */
 export const ALLOWED_MIME_TYPES = [
@@ -39,16 +40,57 @@ export class StorageService {
   private readonly logger = new Logger(StorageService.name);
   private readonly configured: boolean;
 
-  constructor() {
-    const cloudName = env("CLOUDINARY_CLOUD_NAME");
-    const apiKey = env("CLOUDINARY_API_KEY");
-    const apiSecret = env("CLOUDINARY_API_SECRET");
+  constructor(private readonly media: MediaService) {
+    // Values pasted into a dashboard often carry a stray space or newline, and
+    // a wrapping pair of quotes. Cloudinary then rejects the credential with a
+    // 401 that names a cloud that *looks* correct in the log, so strip both.
+    const clean = (value: string | undefined): string | undefined =>
+      value?.trim().replace(/^["']|["']$/g, "") || undefined;
+
+    const cloudName = clean(env("CLOUDINARY_CLOUD_NAME"));
+    const apiKey = clean(env("CLOUDINARY_API_KEY"));
+    const apiSecret = clean(env("CLOUDINARY_API_SECRET"));
 
     this.configured = Boolean(cloudName && apiKey && apiSecret);
     if (this.configured) {
       cloudinary.config({ cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret, secure: true });
+
+      // Boot-time fingerprint of what this process actually loaded. The cloud
+      // name is public (it appears in every delivery URL) and the key is only
+      // shown as a length + last 4, so nothing secret reaches the log. Without
+      // this there is no way to tell a stale env var from a wrong one — both
+      // fail identically at upload time, minutes later.
+      this.logger.log(
+        `Cloudinary configured — cloud_name="${cloudName}", ` +
+          `api_key=***${apiKey!.slice(-4)} (${apiKey!.length} chars), ` +
+          `api_secret set (${apiSecret!.length} chars)`
+      );
     } else {
-      this.logger.warn("Cloudinary is not configured — uploads will be rejected until credentials are set.");
+      const missing = [
+        !cloudName && "CLOUDINARY_CLOUD_NAME",
+        !apiKey && "CLOUDINARY_API_KEY",
+        !apiSecret && "CLOUDINARY_API_SECRET",
+      ].filter(Boolean);
+      this.logger.warn(
+        `Cloudinary is not configured (missing: ${missing.join(", ")}) — uploads will be stored in the database instead.`
+      );
+    }
+  }
+
+  /**
+   * One live round-trip against Cloudinary's usage endpoint. Cheap, read-only,
+   * and it distinguishes the three failure modes that all surface as the same
+   * 401 during an upload: unknown cloud, wrong key/secret, and correct creds.
+   */
+  async verifyCredentials(): Promise<{ ok: boolean; detail: string }> {
+    if (!this.configured) return { ok: false, detail: "Cloudinary credentials are not set." };
+    try {
+      await cloudinary.api.usage();
+      return { ok: true, detail: `Cloudinary reachable as cloud "${cloudinary.config().cloud_name}".` };
+    } catch (error) {
+      const e = error as { error?: { message?: string }; http_code?: number; message?: string };
+      const detail = e?.error?.message ?? e?.message ?? String(error);
+      return { ok: false, detail: `http_code=${e?.http_code ?? "none"}: ${detail}` };
     }
   }
 
@@ -87,9 +129,15 @@ export class StorageService {
    * The client-supplied filename is never used as the storage key — Cloudinary
    * generates the public_id, which avoids path traversal and collisions.
    */
-  async upload(buffer: Buffer, opts: { folder: string; resourceType?: "image" | "video" }): Promise<StoredFile> {
+  async upload(
+    buffer: Buffer,
+    opts: { folder: string; resourceType?: "image" | "video"; mimeType?: string }
+  ): Promise<StoredFile> {
+    // No credentials at all — go straight to the database rather than failing
+    // the whole ingest. The detection pipeline is the point of this endpoint;
+    // where the pixels live is an implementation detail.
     if (!this.configured) {
-      throw new ServiceUnavailableException("File storage is not configured on this server.");
+      return this.storeInDatabase(buffer, opts, "Cloudinary is not configured");
     }
 
     let result: UploadApiResponse;
@@ -119,17 +167,22 @@ export class StorageService {
       const httpCode = cloudinaryError?.http_code;
       const detail = cloudinaryError?.message ?? String(error);
 
-      this.logger.error(`Cloudinary upload failed (http_code=${httpCode ?? "none"}): ${detail}`);
+      // Surface whatever Cloudinary actually said. The SDK flattens a
+      // non-JSON body to "Server returned unexpected status code - 403",
+      // which names no cause at all, so dig the nested message out first.
+      const nested = (error as { error?: { message?: string } })?.error?.message;
+      this.logger.error(
+        `Cloudinary upload failed (http_code=${httpCode ?? "none"}): ${nested ?? detail}`
+      );
 
-      if (httpCode === 401 || httpCode === 403) {
-        throw new ServiceUnavailableException(
-          "File storage rejected our credentials. Check CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET / CLOUDINARY_CLOUD_NAME."
-        );
-      }
-      if (httpCode === 420 || httpCode === 429) {
-        throw new ServiceUnavailableException("File storage rate limit or quota reached. Try again later.");
-      }
-      throw new ServiceUnavailableException(`File storage could not accept the upload: ${detail}`);
+      // Every Cloudinary failure is recoverable from the caller's point of
+      // view, because the bytes can still be persisted here. An upload that
+      // reaches the ML model and the detection history beats a 503.
+      return this.storeInDatabase(
+        buffer,
+        opts,
+        `Cloudinary returned ${httpCode ?? "an error"}: ${nested ?? detail}`
+      );
     }
 
     return {
@@ -139,6 +192,53 @@ export class StorageService {
       format: result.format,
       resourceType: result.resource_type,
     };
+  }
+
+  /**
+   * Persists the bytes in Postgres and returns a StoredFile shaped exactly
+   * like a Cloudinary result, so callers can't tell the two apart.
+   */
+  private async storeInDatabase(
+    buffer: Buffer,
+    opts: { resourceType?: "image" | "video"; mimeType?: string },
+    reason: string
+  ): Promise<StoredFile> {
+    const resourceType = opts.resourceType ?? "image";
+    const mimeType = opts.mimeType ?? (resourceType === "video" ? "video/mp4" : "image/jpeg");
+
+    let asset;
+    try {
+      asset = await this.media.save(buffer, mimeType);
+    } catch (error) {
+      // Both stores are down. Now a 503 is honest.
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Database fallback also failed: ${detail}`);
+      throw new ServiceUnavailableException(
+        "The image could not be stored. Cloudinary rejected it and the database fallback failed too."
+      );
+    }
+
+    this.logger.warn(`Stored upload in the database instead of Cloudinary — ${reason}. Media id: ${asset.id}`);
+
+    return {
+      url: `${this.baseUrl()}/api/media/${asset.id}`,
+      publicId: `db:${asset.id}`,
+      bytes: asset.sizeBytes,
+      format: mimeType.split("/")[1] ?? "bin",
+      resourceType,
+    };
+  }
+
+  /**
+   * Absolute origin for media URLs. They are rendered by a browser on a
+   * different domain (Vercel), so a relative path would resolve against the
+   * frontend and 404. Render injects RENDER_EXTERNAL_URL automatically, which
+   * keeps this correct without another env var to forget.
+   */
+  private baseUrl(): string {
+    const configured = env("PUBLIC_BASE_URL") ?? env("RENDER_EXTERNAL_URL");
+    if (configured) return configured.replace(/\/+$/, "");
+    return `http://localhost:${env("PORT") ?? 8000}`;
   }
 
   /** Time-limited signed URL, for media that shouldn't be publicly guessable. */

@@ -62,6 +62,9 @@ export class MlController {
     const stored = await this.storage.upload(file.buffer, {
       folder: `vigileye/structures/${structureId}`,
       resourceType: file.mimetype.startsWith("video/") ? "video" : "image",
+      // Needed by the database fallback, which has no Cloudinary response to
+      // learn the type from and must set Content-Type itself when serving.
+      mimeType: file.mimetype,
     });
 
     const result = await this.ml.predict(file.buffer, file.originalname);
